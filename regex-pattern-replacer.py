@@ -1,19 +1,20 @@
 from dataclasses import dataclass, field, fields
 from abc import ABC, abstractmethod
+from functools import wraps
 import argparse
 import re
 import os
-from typing import Any
+from typing import Any, Callable, Generator
 
 
-# [ZONE]: GLOBAL VARIABLES (code bellow)
+### [BLOCK]: GLOBAL VARIABLES (code bellow) ###
 
 APPLICATION_METADATA = {
-    "version": '0.1',
+    "version": '0.2',
     "GitHub": 'https://github.com/chabrovs/regex-pattern-replacer',
 }
 
-# [ZONE]: META CLASSES AND DESCRIPTORS (code bellow)
+### [BLOCK]: META CLASSES AND DESCRIPTORS (code bellow) ###
 
 
 class DefaultValueDescriptor:
@@ -37,9 +38,9 @@ class DataclassDefaultsMeta(type):
             setattr(cls, field.name, DefaultValueDescriptor(field.name, default))
 
 
-# [ZONE]: DATA CLASSES (code bellow)
+### [BLOCK]: DATA CLASSES (code bellow) ###
 
-# NOTE: This dataclass is not in use in version 0.1.
+# NOTE: This dataclass is not in use in version 0.1 and newer.
 @dataclass(repr=True, init=False)
 class Stdout(DataclassDefaultsMeta):
     help_text: str = """Script v.0.1 Replace certain code patterns in your projects files like .html .css .js etc. using RegEx\n\nUsage: python3 script.py [OPTIONS] full_path Replacement Pattern\n\nOptions: \n-h --help \tPrint help message. \n\nExample:\t >>>python3 script.py /home/user/myproject <h*>Hello World !</h*> <h1>Hello Script !</h1>\n\t Result: From this pattern in code <h*>Hello World !</h*> to this pattern<h1>Hello Script !</h1>\n"""
@@ -64,7 +65,7 @@ class ReplacerArguments:
 
     @classmethod
     def initialize_file_extensions(cls):
-        cls.file_extensions = ['.www']
+        cls.file_extensions = ['.html']
         print(
             f"""[INFO]: File extensions were not specified. Looking for files with default extensions: {cls.file_extensions}
         You can use -e --extensions flag to specify extensions. 
@@ -82,14 +83,63 @@ class ReplacerArguments:
         cls.full_path = cli_arguments_dist.get('full_path')
         cls.pattern = cli_arguments_dist.get('pattern')
         cls.replacement = cli_arguments_dist.get('replacement')
+        cls.verbose = True if cli_arguments_dist.get('verbose') else False
+        print(f"[DEBUG]: <ln 87> verbose={cls.verbose}")
 
         if cli_arguments_dist.get('extensions'):
             cls.file_extensions = cli_arguments_dist.get('extensions')
         else:
             cls.initialize_file_extensions()
 
+### [BLOCK]: DECORATORS ###
 
-# [ZONE]: ABSTRACT BASE CLASSES and INTERFACES (bellow)
+def default_verbose(callback: Callable, callbackArgument='use_func_result') -> Callable:
+    """
+    :Param callback: A function that should contain implementation of verbose logic inside.
+    :Param callbackArgument: Choose what arguments to pass to the Callback function.
+        Options: 
+        - "use_func_args" to pass the wrapped function arguments as arguments for the Callback function.
+        - "use_func_result" to pass the wrapped function results as arguments for the Callback function.
+    """
+
+    def outer(func: Callable) -> Callable:
+        @wraps(func)
+        def inner(*args, **kwargs) -> Any:
+            result = func(*args, **kwargs)
+            if ReplacerArguments.verbose == True:
+                try:
+                    match callbackArgument:
+                        case 'use_func_args':
+                            callback(*args, **kwargs)
+                        case 'use_func_result':
+                            callback(result)
+                        case _:
+                            raise Exception(f"[VERBOSE ERROR]: Argument option ({callbackArgument}) for the Callback function ({callback.__name__}) is not supported.\n Available options: 'use_func_args', 'use_func_result'")
+                except TypeError:
+                    raise Exception(
+                        f"[VERBOSE]: function ({func.__name__}) does not support verbose.")
+            return result
+        return inner
+    return outer
+
+
+### [BLOCK]: VERBOSE CALLBACKS ###
+
+def verbose_get_matched_files(matched_files: list[str] | Generator) -> None:
+    if isinstance(matched_files, Generator):
+        raise NotImplementedError(
+            "Verbose is not supported for the 'Generator' datatype")
+
+    print(f'[VERBOSE]: Patterns will be replaced in these files:')
+    for num, file_absolute_path in enumerate(matched_files):
+        print(f'\t #{num} {file_absolute_path}')
+
+
+def verbose_read_file(cls, absolute_path: str) -> None:
+    print(f'[VERBOSE]: Reading file {absolute_path}')
+
+
+### [BLOCK]: ABSTRACT BASE CLASSES and INTERFACES (bellow) ###
 
 class FileManager(ABC):
     """
@@ -104,6 +154,7 @@ class FileManager(ABC):
         """Find files with certain files extensions """
         ...
 
+    @default_verbose(verbose_read_file, callbackArgument='use_func_args')
     def read_file(self, absolute_filepath: str) -> str:
         with open(str(absolute_filepath), 'r') as file:
             content = file.read()
@@ -122,7 +173,7 @@ class DocumentScanner(ABC):
 
     def __init__(self) -> None:
         super().__init__()
-        self.current_file_manager = FileFinderIterator()  
+        self.current_file_manager = FileFinderIterator()
         # NOTE: Add an option to chose current_file_manager dynamically. \
         # In version 0.1 you can specify FileFined based on an iterator or decorator manually by changing the `current_file_manager` variable.
 
@@ -138,8 +189,7 @@ class DocumentScanner(ABC):
         ...
 
 
-# [ZONE]: CLASS IMPLEMENTATION
-
+### [BLOCK]: CLASS IMPLEMENTATION ###
 
 class FileFinderGenerator(FileManager):
     def find_files(self, start_directory: str, files_extensions: list[str], top_down=True):
@@ -172,6 +222,13 @@ class RegExScanner(DocumentScanner):
     def __init__(self) -> None:
         super().__init__()
 
+    @default_verbose(verbose_get_matched_files)
+    def get_matched_files(self, absolute_filepath: str) -> list | Generator:
+        return self.current_file_manager.find_files(
+            start_directory=absolute_filepath,
+            files_extensions=ReplacerArguments.file_extensions
+        )
+
     def substitute(self, absolute_filepath: str, pattern: str, replacement: str) -> None:
         """
         Pattern is the pattern of code that will be replaced. Needs to be written in RegEx.
@@ -179,11 +236,7 @@ class RegExScanner(DocumentScanner):
         Scan the document and substitute.
         """
 
-        matched_files = self.current_file_manager.find_files(
-            start_directory=absolute_filepath,
-            files_extensions=ReplacerArguments.file_extensions
-        )
-        # print(f'[DEBUG]<ln 193>: Matched files: {matched_files}')
+        matched_files = self.get_matched_files(absolute_filepath)
 
         for matched_file in matched_files:
             # print(f"DEBUG: <ln: 190>: {matched_file} ")
@@ -193,7 +246,7 @@ class RegExScanner(DocumentScanner):
                 matched_file, modified_content)
 
 
-# [ZONE]: APIs (code bellow)
+### [BLOCK]: APIs (code bellow) ###
 
 class Replacer:
     """
@@ -218,7 +271,7 @@ class Replacer:
     def substitute(self, replacer_arguments: ReplacerArguments) -> None:
         """
         Find all files with a specified extension in the directory and subdirectories.
-        :param replacer_argument: A dataclass 'ReplacerArguments` that contains all required arguments \
+        :Param replacer_argument: A dataclass 'ReplacerArguments` that contains all required arguments \
             for a pattern substitution, such as: 
                 - absolute path to the directory you want to operate with,
                 - pattern you want to be replaced <pattern>,
@@ -233,7 +286,7 @@ class Replacer:
 
     def foo(self) -> None:
         """
-        [DEV] <ln: 239>: For development only.
+        [DEV] <ln: 290>: For development only.
         """
 
         print(ReplacerArguments())
@@ -241,10 +294,10 @@ class Replacer:
 
     def foo_with_args(self, args: ReplacerArguments) -> None:
         """
-        [DEV] <ln: 246>: For development only.
+        [DEV] <ln: 298>: For development only.
         """
 
-        print(f'[DEBUG] <ln: 253>: Provided args: {args}')
+        print(f'[DEBUG] <ln: 301>: Provided args: {args}')
 
 
 class Cli(Replacer):
@@ -277,10 +330,7 @@ class Cli(Replacer):
         args: argparse.Namespace = self.parser.parse_args()
         print(args._get_kwargs())
 
-        if args.verbose:
-            raise NotImplementedError(
-                "The verbose method is not implemented yet.")
-        elif args.version:
+        if args.version:
             self.replacer.print_current_version()
         else:
             for name, arg in args._get_kwargs():
@@ -292,7 +342,7 @@ class Cli(Replacer):
             self.replacer.substitute(current_replacer_arguments)
 
 
-# [ZONE]: ENTRY POINT (code bellow)
+### [BLOCK]: ENTRY POINT (code bellow) ###
 
 def main():
     myapp = Cli()
