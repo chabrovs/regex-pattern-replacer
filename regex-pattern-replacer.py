@@ -10,7 +10,7 @@ from typing import Any, Callable, Generator
 ### [BLOCK]: GLOBAL VARIABLES (code bellow) ###
 
 APPLICATION_METADATA = {
-    "version": '0.2',
+    "version": '0.3',
     "GitHub": 'https://github.com/chabrovs/regex-pattern-replacer',
 }
 
@@ -55,6 +55,7 @@ class ReplacerArguments:
     replacement: str
     file_extensions: list[str] | None = field(default_factory=list)
     verbose: bool = False
+    force: bool = False
 
     def __str__(self) -> str:
         return f"full_path={self.full_path}, pattern={self.pattern}, replacement={self.replacement}, file_extensions={self.file_extensions}"
@@ -81,10 +82,10 @@ class ReplacerArguments:
             print(f"Error: {e}")
 
         cls.full_path = cli_arguments_dist.get('full_path')
-        cls.pattern = cli_arguments_dist.get('pattern')
+        cls.pattern = re.compile(cli_arguments_dist.get('pattern'))
         cls.replacement = cli_arguments_dist.get('replacement')
         cls.verbose = True if cli_arguments_dist.get('verbose') else False
-        print(f"[DEBUG]: <ln 87> verbose={cls.verbose}")
+        cls.force = True if cli_arguments_dist.get('force') else False
 
         if cli_arguments_dist.get('extensions'):
             cls.file_extensions = cli_arguments_dist.get('extensions')
@@ -92,6 +93,7 @@ class ReplacerArguments:
             cls.initialize_file_extensions()
 
 ### [BLOCK]: DECORATORS ###
+
 
 def default_verbose(callback: Callable, callbackArgument='use_func_result') -> Callable:
     """
@@ -114,7 +116,8 @@ def default_verbose(callback: Callable, callbackArgument='use_func_result') -> C
                         case 'use_func_result':
                             callback(result)
                         case _:
-                            raise Exception(f"[VERBOSE ERROR]: Argument option ({callbackArgument}) for the Callback function ({callback.__name__}) is not supported.\n Available options: 'use_func_args', 'use_func_result'")
+                            raise Exception(
+                                f"[VERBOSE ERROR]: Argument option ({callbackArgument}) for the Callback function ({callback.__name__}) is not supported.\n Available options: 'use_func_args', 'use_func_result'")
                 except TypeError:
                     raise Exception(
                         f"[VERBOSE]: function ({func.__name__}) does not support verbose.")
@@ -130,13 +133,23 @@ def verbose_get_matched_files(matched_files: list[str] | Generator) -> None:
         raise NotImplementedError(
             "Verbose is not supported for the 'Generator' datatype")
 
-    print(f'[VERBOSE]: Patterns will be replaced in these files:')
-    for num, file_absolute_path in enumerate(matched_files):
-        print(f'\t #{num} {file_absolute_path}')
+    print(f'[VERBOSE]: List of matched files:')
+    for num, file_absolute_path in enumerate(matched_files, 1):
+        print(f'\t #{num}: {file_absolute_path}')
 
 
 def verbose_read_file(cls, absolute_path: str) -> None:
     print(f'[VERBOSE]: Reading file {absolute_path}')
+
+
+def verbose_write_file(cls, absolute_path: str, modified_content: str) -> None:
+    print(
+        f"[VERBOSE]: {absolute_path}: {ReplacerArguments.pattern} -> {ReplacerArguments.replacement}")
+
+
+def verbose_substitute(cls, absolute_filepath: str, pattern: str, replacement: str) -> None:
+    if ReplacerArguments.force == True:
+        print(f'[VERBOSE]: Pattern substitution was forces for files in ({absolute_filepath})')
 
 
 ### [BLOCK]: ABSTRACT BASE CLASSES and INTERFACES (bellow) ###
@@ -154,13 +167,14 @@ class FileManager(ABC):
         """Find files with certain files extensions """
         ...
 
-    @default_verbose(verbose_read_file, callbackArgument='use_func_args')
+    # @default_verbose(verbose_read_file, callbackArgument='use_func_args')
     def read_file(self, absolute_filepath: str) -> str:
         with open(str(absolute_filepath), 'r') as file:
             content = file.read()
 
         return content
 
+    @default_verbose(verbose_write_file, callbackArgument='use_func_args')
     def write_file(self, absolute_filepath: str, modified_content: str) -> None:
         with open(str(absolute_filepath), 'w') as file:
             file.write(modified_content)
@@ -229,6 +243,7 @@ class RegExScanner(DocumentScanner):
             files_extensions=ReplacerArguments.file_extensions
         )
 
+    @default_verbose(verbose_substitute, callbackArgument='use_func_args')
     def substitute(self, absolute_filepath: str, pattern: str, replacement: str) -> None:
         """
         Pattern is the pattern of code that will be replaced. Needs to be written in RegEx.
@@ -239,11 +254,17 @@ class RegExScanner(DocumentScanner):
         matched_files = self.get_matched_files(absolute_filepath)
 
         for matched_file in matched_files:
-            # print(f"DEBUG: <ln: 190>: {matched_file} ")
             content = self.get_file_content(matched_file)
             modified_content = re.sub(pattern, replacement, content)
-            self.current_file_manager.write_file(
-                matched_file, modified_content)
+
+            # Substitute only if changes were made.
+            if ReplacerArguments.force == True:
+                self.current_file_manager.write_file(
+                    matched_file, modified_content)
+            else:
+                if content != modified_content:
+                    self.current_file_manager.write_file(
+                        matched_file, modified_content)
 
 
 ### [BLOCK]: APIs (code bellow) ###
@@ -314,15 +335,17 @@ class Cli(Replacer):
 
     def setup_arguments(self) -> None:
         self.parser.add_argument(
-            '-v', '--verbose', action='store_true', help="Enable verbose output")
+            '-v', '--verbose', action='store_true', help="Enable verbose output.")
+        self.parser.add_argument(
+            '-f', '--force', action='store_true', help="Substitute even if there is no matching pattern.")
         self.group_helper_flags.add_argument(
-            '-V', '--version', action='store_true', help="Print current version")
+            '-V', '--version', action='store_true', help="Print current version.")
         self.parser.add_argument(
-            'full_path', type=str, help="Set absolute path to the directory", default=None, nargs='?')
+            'full_path', type=str, help="Set absolute path to the directory.", default=None, nargs='?')
         self.parser.add_argument(
-            'pattern', type=str, help='Pattern you wish to be replaced', default=None, nargs='?')
+            'pattern', type=str, help='Pattern you wish to be replaced.', default=None, nargs='?')
         self.parser.add_argument(
-            'replacement', type=str, help='Pattern you wish to use', default=None, nargs='?')
+            'replacement', type=str, help='Pattern you wish to use.', default=None, nargs='?')
         self.parser.add_argument(
             '-e', '--extensions', nargs='+', help="Provide list of file extensions list -e .js")
 
