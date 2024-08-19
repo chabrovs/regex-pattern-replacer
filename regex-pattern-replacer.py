@@ -4,21 +4,32 @@ from functools import wraps
 import argparse
 import re
 import os
-from typing import Any, Callable, Generator
+from typing_extensions import Any, Callable, Generator, Optional, Pattern
 
 
 ### [BLOCK]: GLOBAL VARIABLES (code bellow) ###
 
 APPLICATION_METADATA = {
-    "version": '0.3',
+    "version": '0.4',
     "GitHub": 'https://github.com/chabrovs/regex-pattern-replacer',
 }
 
+## [BLOCK]: EXCEPTIONS (code bellow) ###
+
+class ExceptionReplacerArgs(Exception):
+    def __init__(self, method: str,  value: Any, message='Invalid argument') -> None:
+        self.method = method
+        self.value = value
+        self.message = message
+        super().__init__(self.message)
+    
+    def __str__(self) -> str:
+        return f'{self.message} was provided in the ({self.method}) method with value: ({str(self.value)}) of type ({type(self.value)})'
+
 ### [BLOCK]: META CLASSES AND DESCRIPTORS (code bellow) ###
 
-
 class DefaultValueDescriptor:
-    def __init__(self, name, default):
+    def __init__(self, name, default) -> None:
         self.name = name
         self.default = default
 
@@ -48,54 +59,91 @@ class Stdout(DataclassDefaultsMeta):
     no_such_option_error: str = """There is no such option """
 
 
-@dataclass(slots=True, repr=True, init=False)
+@dataclass(slots=False, repr=True, init=False)
 class ReplacerArguments:
     full_path: str
-    pattern: str
-    replacement: str
-    file_extensions: list[str] | None = field(default_factory=list)
+    pattern: Optional[Pattern[str]]
+    replacement: Optional[str]
+    file_extensions: list[str] = field(default_factory=list)
     verbose: bool = False
     force: bool = False
 
     def __str__(self) -> str:
         return f"full_path={self.full_path}, pattern={self.pattern}, replacement={self.replacement}, file_extensions={self.file_extensions}"
 
+    # Setter methods
     @classmethod
-    def get_slots(cls) -> tuple[str]:
-        return cls.__slots__
+    def set_full_path(cls, value: str | None) -> None:
+        match value:
+            case '': raise ExceptionReplacerArgs('set_full_path', value)
+            case None: raise ExceptionReplacerArgs('set_full_path', value)
+ 
+        cls.full_path = value
 
     @classmethod
-    def initialize_file_extensions(cls):
-        cls.file_extensions = ['.html']
-        print(
-            f"""[INFO]: File extensions were not specified. Looking for files with default extensions: {cls.file_extensions}
-        You can use -e --extensions flag to specify extensions. 
-        Command example: $script.py /path pattern replacement -e js xml 
-        Note: do NOT use dots and commas.    
-        \n""")
+    def set_pattern(cls, value: str | None) -> None:
+        if not value:
+            raise ExceptionReplacerArgs('set_pattern', value)
+        
+        cls.pattern = re.compile(value)
+
+    @classmethod
+    def set_replacement(cls, value: str | None) -> None:
+        if not value:
+            raise ExceptionReplacerArgs('set_replacement', value)
+        
+        cls.replacement = value
+
+    @classmethod
+    def set_file_extensions(cls, value: list[str] | None) -> None:
+        if not value:
+            cls.file_extensions = ['.html']
+            print(
+                f"""[INFO]: File extensions were not specified. Looking for files with default extensions: {cls.file_extensions}
+            You can use -e --extensions flag to specify extensions. 
+            Command example: $script.py /path pattern replacement -e js xml 
+            Note: do NOT use dots and commas.    
+            \n""")
+            
+            return
+        
+        cls.file_extensions = value
+
+    @classmethod
+    def set_verbose(cls, value: bool | None) -> None:
+        if value:
+            cls.verbose = True
+            return
+        
+        cls.verbose = False
+
+    @classmethod
+    def set_force(cls, value: bool | None) -> None:
+        if value:
+            cls.force = True
+            return
+        
+        cls.force = False
 
     @classmethod
     def build(cls, cli_arguments: list[tuple[str, Any]]) -> None:
         try:
-            cli_arguments_dist = dict(cli_arguments)
+            cli_arguments_dict = dict(cli_arguments)
         except ValueError as e:
             print(f"Error: {e}")
 
-        cls.full_path = cli_arguments_dist.get('full_path')
-        cls.pattern = re.compile(cli_arguments_dist.get('pattern'))
-        cls.replacement = cli_arguments_dist.get('replacement')
-        cls.verbose = True if cli_arguments_dist.get('verbose') else False
-        cls.force = True if cli_arguments_dist.get('force') else False
+        cls.set_full_path(cli_arguments_dict.get('full_path'))
+        cls.set_pattern(cli_arguments_dict.get('pattern'))
+        cls.set_replacement(cli_arguments_dict.get('replacement'))
+        cls.set_file_extensions(cli_arguments_dict.get('extensions'))
+        cls.set_verbose(cli_arguments_dict.get('verbose'))
+        cls.set_force(cli_arguments_dict.get('force'))
 
-        if cli_arguments_dist.get('extensions'):
-            cls.file_extensions = cli_arguments_dist.get('extensions')
-        else:
-            cls.initialize_file_extensions()
 
 ### [BLOCK]: DECORATORS ###
 
 
-def default_verbose(callback: Callable, callbackArgument='use_func_result') -> Callable:
+def default_verbose(callback: Callable, callbackArgument: str ='use_func_result') -> Callable:
     """
     :Param callback: A function that should contain implementation of verbose logic inside.
     :Param callbackArgument: Choose what arguments to pass to the Callback function.
@@ -129,10 +177,11 @@ def default_verbose(callback: Callable, callbackArgument='use_func_result') -> C
 ### [BLOCK]: VERBOSE CALLBACKS ###
 
 def verbose_get_matched_files(matched_files: list[str] | Generator) -> None:
-    if isinstance(matched_files, Generator):
+    """Generic function. Default implementation for (<class> 'generator')"""
+    if issubclass(type(matched_files), Generator):
         raise NotImplementedError(
             "Verbose is not supported for the 'Generator' datatype")
-
+    
     print(f'[VERBOSE]: List of matched files:')
     for num, file_absolute_path in enumerate(matched_files, 1):
         print(f'\t #{num}: {file_absolute_path}')
@@ -163,7 +212,7 @@ class FileManager(ABC):
         super().__init__()
 
     @abstractmethod
-    def find_files(self, start_directory: str, files_extensions: list[str], top_down=True):
+    def find_files(self, start_directory: str, files_extensions: list[str], top_down=True) -> list[str] | Generator[str]:
         """Find files with certain files extensions """
         ...
 
@@ -199,14 +248,14 @@ class DocumentScanner(ABC):
         return self.current_file_manager.read_file(absolute_path)
 
     @abstractmethod
-    def substitute(self, absolute_path: str, pattern: str, replacement: str, file_extensions: list) -> Any:
+    def substitute(self, absolute_path: str, pattern: str, replacement: str, file_extensions: list) -> None:
         ...
 
 
 ### [BLOCK]: CLASS IMPLEMENTATION ###
 
 class FileFinderGenerator(FileManager):
-    def find_files(self, start_directory: str, files_extensions: list[str], top_down=True):
+    def find_files(self, start_directory: str, files_extensions: list[str], top_down: bool = True) -> Generator[str]:
         """Find files with certain files extensions """
         for root, directories, files in os.walk(start_directory, topdown=top_down):
             for file in files:
@@ -216,7 +265,7 @@ class FileFinderGenerator(FileManager):
 
 
 class FileFinderIterator(FileManager):
-    def find_files(self, start_directory: str, files_extensions: list[str], top_down=True) -> list[str]:
+    def find_files(self, start_directory: str, files_extensions: list[str], top_down: bool = True) -> list[str]:
         """Find files with certain files extensions """
         matched_files = []
         for root, directories, files in os.walk(start_directory, topdown=top_down):
@@ -237,7 +286,7 @@ class RegExScanner(DocumentScanner):
         super().__init__()
 
     @default_verbose(verbose_get_matched_files)
-    def get_matched_files(self, absolute_filepath: str) -> list | Generator:
+    def get_matched_files(self, absolute_filepath: str) -> list[str] | Generator[str]:
         return self.current_file_manager.find_files(
             start_directory=absolute_filepath,
             files_extensions=ReplacerArguments.file_extensions
