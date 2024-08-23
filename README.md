@@ -23,6 +23,7 @@ In this case: `$python3 regex-pattern-replacer /path/to/your/project/templates '
 -v --verbose | verbose output
 -V --version | print current version
 -e --extensions [EXTENSIONS...] | Specify file extensions to look for in the directory. E.g. html js 
+-t --translate 'some_text'| Translate a string to the Regular Expression string. 
 # Example:
 `$python3 regex-pattern-replacer -v /path/to/your/project/templates 'RegExPattern_to_be_replaced' 'RegExPattern' -e html js xml`
 
