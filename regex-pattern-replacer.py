@@ -7,14 +7,15 @@ import os
 from typing_extensions import Any, Callable, Generator, Optional, Pattern
 
 
-### [BLOCK]: GLOBAL VARIABLES (code bellow) ###
+#region: GLOBAL VARIABLES (code bellow) ###
 
 APPLICATION_METADATA = {
-    "version": '0.4',
+    "version": '0.5',
     "GitHub": 'https://github.com/chabrovs/regex-pattern-replacer',
 }
+#endregion
 
-## [BLOCK]: EXCEPTIONS (code bellow) ###
+#region: EXCEPTIONS (code bellow) ###
 
 class ExceptionReplacerArgs(Exception):
     def __init__(self, method: str,  value: Any, message='Invalid argument') -> None:
@@ -26,7 +27,9 @@ class ExceptionReplacerArgs(Exception):
     def __str__(self) -> str:
         return f'{self.message} was provided in the ({self.method}) method with value: ({str(self.value)}) of type ({type(self.value)})'
 
-### [BLOCK]: META CLASSES AND DESCRIPTORS (code bellow) ###
+#endregion
+
+#region: META CLASSES AND DESCRIPTORS (code bellow) ###
 
 class DefaultValueDescriptor:
     def __init__(self, name, default) -> None:
@@ -48,8 +51,9 @@ class DataclassDefaultsMeta(type):
                 default = field.default_factory()
             setattr(cls, field.name, DefaultValueDescriptor(field.name, default))
 
+#endregion
 
-### [BLOCK]: DATA CLASSES (code bellow) ###
+#region: DATA CLASSES (code bellow) ###
 
 # NOTE: This dataclass is not in use in version 0.1 and newer.
 @dataclass(repr=True, init=False)
@@ -140,7 +144,9 @@ class ReplacerArguments:
         cls.set_force(cli_arguments_dict.get('force'))
 
 
-### [BLOCK]: DECORATORS ###
+#endregion
+
+#region: DECORATORS ###
 
 
 def default_verbose(callback: Callable, callbackArgument: str ='use_func_result') -> Callable:
@@ -173,8 +179,9 @@ def default_verbose(callback: Callable, callbackArgument: str ='use_func_result'
         return inner
     return outer
 
+#endregion
 
-### [BLOCK]: VERBOSE CALLBACKS ###
+#region: VERBOSE CALLBACKS ###
 
 def verbose_get_matched_files(matched_files: list[str] | Generator) -> None:
     """Generic function. Default implementation for (<class> 'generator')"""
@@ -200,8 +207,9 @@ def verbose_substitute(cls, absolute_filepath: str, pattern: str, replacement: s
     if ReplacerArguments.force == True:
         print(f'[VERBOSE]: Pattern substitution was forces for files in ({absolute_filepath})')
 
+#endregion
 
-### [BLOCK]: ABSTRACT BASE CLASSES and INTERFACES (bellow) ###
+#region: ABSTRACT BASE CLASSES and INTERFACES (bellow) ###
 
 class FileManager(ABC):
     """
@@ -252,7 +260,28 @@ class DocumentScanner(ABC):
         ...
 
 
-### [BLOCK]: CLASS IMPLEMENTATION ###
+class Tools(ABC):
+    """
+    Abstract base class that contains tools.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+
+#endregion 
+
+#region: CLASS IMPLEMENTATION ###
+
+class Translator(Tools):
+    """
+    Tool. Translate text, strings, etc. into regular expressions.
+    """
+
+    def str_to_regex_str(self, to_translate: str) -> None:
+        translated = str(re.escape(to_translate))
+        print(f"Translated: '{to_translate}' ==> '{translated}'")
+
 
 class FileFinderGenerator(FileManager):
     def find_files(self, start_directory: str, files_extensions: list[str], top_down: bool = True) -> Generator[str]:
@@ -316,7 +345,9 @@ class RegExScanner(DocumentScanner):
                         matched_file, modified_content)
 
 
-### [BLOCK]: APIs (code bellow) ###
+#endregion
+
+#region: APIs (code bellow) ###
 
 class Replacer:
     """
@@ -330,6 +361,7 @@ class Replacer:
         Composite low layer interfaces.
         """
         self.regExScanner = RegExScanner()
+        self.translator = Translator()
 
     def print_current_version(self) -> None:
         """
@@ -353,6 +385,9 @@ class Replacer:
             pattern=replacer_arguments.pattern,
             replacement=replacer_arguments.replacement
         )
+
+    def translate_str_to_regex_str(self, to_translate: str) -> str:
+        self.translator.str_to_regex_str(to_translate)
 
     def foo(self) -> None:
         """
@@ -379,6 +414,7 @@ class Cli(Replacer):
         self.replacer = Replacer()
         self.parser = argparse.ArgumentParser("Replacer")
         self.group_helper_flags = self.parser.add_mutually_exclusive_group()
+        self.group_tools = self.parser.add_mutually_exclusive_group()
         self.parser.usage = 'script.py [OPTION] absolute_path_to_the_directory replacement pattern'
         self.setup_arguments()
 
@@ -389,6 +425,9 @@ class Cli(Replacer):
             '-f', '--force', action='store_true', help="Substitute even if there is no matching pattern.")
         self.group_helper_flags.add_argument(
             '-V', '--version', action='store_true', help="Print current version.")
+        self.group_tools.add_argument(
+            '-t', '--translate', type=str, help="Translate a string into a regular expression."
+        )
         self.parser.add_argument(
             'full_path', type=str, help="Set absolute path to the directory.", default=None, nargs='?')
         self.parser.add_argument(
@@ -404,6 +443,8 @@ class Cli(Replacer):
 
         if args.version:
             self.replacer.print_current_version()
+        elif args.translate:
+            self.replacer.translate_str_to_regex_str(args.translate)
         else:
             for name, arg in args._get_kwargs():
                 if arg == "":
@@ -413,8 +454,9 @@ class Cli(Replacer):
             current_replacer_arguments: ReplacerArguments = ReplacerArguments()
             self.replacer.substitute(current_replacer_arguments)
 
+#endregion
 
-### [BLOCK]: ENTRY POINT (code bellow) ###
+#region: ENTRY POINT (code bellow) ###
 
 def main():
     myapp = Cli()
@@ -423,3 +465,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+#endregion
